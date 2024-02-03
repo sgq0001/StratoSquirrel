@@ -1,0 +1,334 @@
+from digi.xbee.models.address import XBee16BitAddress
+from pyqtgraph.Qt import QtGui, QtCore, QtWidgets
+import pyqtgraph as pg
+import numpy as np
+import time
+from datetime import datetime
+from digi.xbee.devices import DigiPointDevice, RemoteDigiPointDevice, XBee64BitAddress
+from digi.xbee.models.options import DiscoveryOptions
+from digi.xbee.models.status import NetworkDiscoveryStatus
+
+from PyQt5.QtWidgets import QPushButton
+
+# Instantiate Devices
+DropBase = DigiPointDevice("COM5", 9600)
+DropBase.open()
+
+"""DropSam = DigiPointDevice("COM14", 9600)
+DropSam.open()
+
+DropTristan = RemoteDigiPointDevice(DropSam, XBee64BitAddress.from_hex_string("0013A20041078CC9"))"""
+
+diginet = DropBase.get_network()
+diginet.set_discovery_options({DiscoveryOptions.DISCOVER_MYSELF,
+                               DiscoveryOptions.APPEND_DD})
+diginet.set_discovery_timeout(10)
+diginet.clear()
+
+
+# Callback for discovered devices.
+def callback_device_discovered(remote):
+    print("Device discovered: %s" % remote)
+
+
+# Callback for discovery finished.
+def callback_discovery_finished(status):
+    if status == NetworkDiscoveryStatus.SUCCESS:
+        print("Discovery process finished successfully.\n")
+    else:
+        print("There was an error discovering devices: %s" % status.description)
+
+
+"""# Start discovery process
+diginet.add_device_discovered_callback(callback_device_discovered)
+diginet.add_discovery_process_finished_callback(callback_discovery_finished)
+diginet.start_discovery_process()
+print("Discovering remote XBee devices...")
+while diginet.is_discovery_running():
+    time.sleep(0.5)"""
+
+# Packet: String str = (String)(millis()/1000.0)+","+device+","
+# +(String)altitude+","+(String)ascent_rate+","
+# +(String)vent_status+","+(String)DROP_status+","
+# +(String)latitude+","+(String)longitude;
+
+checkDropNumber = False
+counter = 0
+split_data = []
+dropDeviceNumber = input("Select Drop Device (1,2,3): ")
+
+while not checkDropNumber:
+    if dropDeviceNumber == "1":
+        DropBalloonTop = RemoteDigiPointDevice(DropBase, XBee64BitAddress.from_hex_string("0013A20041E01DF4"))
+        checkDropNumber = True
+    elif dropDeviceNumber == "2":
+        DropBalloonBottom = RemoteDigiPointDevice(DropBase, XBee64BitAddress.from_hex_string("0013A20041DFF0A0"))
+        checkDropNumber = True
+    elif dropDeviceNumber == "3":
+        DropBalloonTop = RemoteDigiPointDevice(DropBase, XBee64BitAddress.from_hex_string("0013A20041E01DF4"))
+        DropBalloonBottom = RemoteDigiPointDevice(DropBase, XBee64BitAddress.from_hex_string("0013A20041DFF0A0"))
+        checkDropNumber = True
+    else:
+        dropDeviceNumber = input("Select Drop Device (1,2,3): ")
+        checkDropNumber = False
+    print()
+
+
+packet_data = []
+err_out_of_bounds = "SIM ERR: attempted to retrieve a packet out of profile's bounds"
+
+
+# Receive message
+def data_receive_callback(xbee_message):
+    global packet_data
+    raw_data = xbee_message.data.decode("latin-1")
+    packet_data = raw_data.split(',')
+    return packet_data
+
+
+pg.setConfigOption('background', (250, 250, 250))
+pg.setConfigOption('foreground', (0, 0, 0))
+# Interface variables
+app = pg.Qt.QtWidgets.QApplication([])
+view = pg.GraphicsView()
+Layout = pg.GraphicsLayout()
+view.setCentralItem(Layout)
+view.show()
+view.setWindowTitle('Flight Data')
+view.resize(1200, 700)
+# Fonts for text items
+font = QtGui.QFont()
+font.setPixelSize(90)
+
+# buttons style
+style_enable = "background-color:rgb(0, 204, 0);color:rgb(250,250,250);font:bold;font-size:17px;"
+style_disable = "background-color:rgb(250, 0, 0);color:rgb(250,250,250);font:bold;font-size:17px;"
+
+# Title
+text = "Space Hardware Club: DROP Ground Station"
+Layout.addLabel(text, col=3, colspan=5)
+Layout.nextRow()
+
+# Altitude graph
+l1 = Layout.addLayout(colspan=20, rowspan=2)
+p1 = l1.addPlot(title="TOP Altitude (m)")
+altitude_plot = p1.plot(pen=(0, 119, 200))
+altitude_data = np.linspace(0, 0, 30)
+ptr1 = 0
+
+# Altitude graph
+p2 = l1.addPlot(title="BOTTOM Altitude (m)")
+altitude2_plot = p2.plot(pen=(0, 119, 200))
+altitude2_data = np.linspace(0, 0, 30)
+ptr2 = 0
+l1.nextCol()
+
+
+def update_altitude(ALT):
+    global altitude_plot, altitude_data, ptr1
+    altitude_data[:-1] = altitude_data[1:]
+    altitude_data[-1] = float(ALT)
+    ptr1 += 1
+    altitude_plot.setData(altitude_data)
+    altitude_plot.setPos(ptr1, 0)
+
+def update_altitude_S(ALT_S):
+    global altitude2_plot, altitude2_data, ptr2
+    altitude2_data[:-1] = altitude2_data[1:]
+    altitude2_data[-1] = float(ALT_S)
+    ptr2 += 1
+    altitude2_plot.setData(altitude2_data)
+    altitude2_plot.setPos(ptr2, 0)
+
+
+# Time, battery and free fall graphs
+l2 = Layout.addLayout(colspan=1, rowspan=2)
+
+
+# Time graph
+time_graph = l2.addPlot(title="TOP Altitude")
+time_graph.hideAxis('bottom')
+time_graph.hideAxis('left')
+time_text = pg.TextItem("test", anchor=(0.5, 0.5), color=(0, 119, 200))
+time_text.setFont(font)
+time_graph.addItem(time_text)
+time_graph.autoRange()
+l2.nextRow()
+
+
+def update_time(VEL):
+    global time_text
+    time_text.setText(str(VEL))
+
+# State Display
+vel_graph = l2.addPlot(title = "Bottom Altitude: ")
+vel_graph.hideAxis('bottom')
+vel_graph.hideAxis('left')
+vel_text = pg.TextItem("test", anchor=(0.5, 0.5), color=(0, 119, 200))
+vel_text.setFont(font)
+vel_graph.addItem(vel_text)
+vel_graph.autoRange()
+
+
+def update_vel(VEL):
+    global vel_text
+    vel_text.setText(str(VEL))
+
+
+Layout.nextRow()
+Layout.nextRow()
+style = "background-color:rgb(0, 119, 200);color:rgb(250,250,250);font:bold;font-size:17px;"
+enable = False
+activate = False
+
+prime = False
+prime2 = False
+
+###########################################################################
+# TOP
+###########################################################################
+def drop_button_pushed_top():
+    if prime == True:
+        DropBase.send_data_64_16(XBee64BitAddress.from_hex_string("0013A20041E01DF4"), XBee16BitAddress.UNKNOWN_ADDRESS, "DROP")
+        print("Dropping...")
+
+def dialog_pushed_top():
+    newAlt, done1 = QtWidgets.QInputDialog.getText(view, 'Input Dialog', 'Enter new alt:')
+    if done1:
+        alt_comm = "C," + str(newAlt) + ",N\n"
+        print(alt_comm)
+        DropBase.send_data_64_16(XBee64BitAddress.from_hex_string("0013A20041E01DF4"), XBee16BitAddress.UNKNOWN_ADDRESS, alt_comm)
+
+def prime_drop_top():
+    global prime
+    if prime == False:
+        prime = True
+        top_drop_button.setStyleSheet(style_enable)
+    else:
+        prime = False
+        top_drop_button.setStyleSheet(style_disable)
+
+###########################################################################
+# BOTTOM
+###########################################################################
+def drop_button_pushed_bot():
+    if prime2 == True:
+        DropBase.send_data_64_16(XBee64BitAddress.from_hex_string("0013A20041DFF0A0"), XBee16BitAddress.UNKNOWN_ADDRESS, "DROP")
+        print("Dropping...")
+
+def dialog_pushed_bot():
+    newAlt2, done2 = QtWidgets.QInputDialog.getText(view, 'Input Dialog', 'Enter new alt:')
+    if done2:
+        alt_comm = "C," + str(newAlt2) + ",N\n"
+        print(alt_comm)
+        DropBase.send_data_64_16(XBee64BitAddress.from_hex_string("0013A20041DFF0A0"), XBee16BitAddress.UNKNOWN_ADDRESS, alt_comm)
+
+def prime_drop_bot():
+    global prime2
+    if prime2 == False:
+        prime2 = True
+        bot_drop_button.setStyleSheet(style_enable)
+    else:
+        prime2 = False
+        bot_drop_button.setStyleSheet(style_disable)
+
+button_layout = Layout.addLayout(colspan=21)
+button_spot = button_layout.addLayout(rowspan=1, border=(83, 83, 83))
+button_spot.nextRow()
+proxy = QtGui.QGraphicsProxyWidget()
+top_drop_button = QtGui.QPushButton('Drop Top')
+top_drop_button.setStyleSheet(style_disable)
+top_drop_button.clicked.connect(drop_button_pushed_top)
+proxy.setWidget(top_drop_button)
+button_spot.addItem(proxy)
+button_spot.nextCol()
+
+proxy2 = QtGui.QGraphicsProxyWidget()
+top_prime_button = QtGui.QPushButton('Prime Top')
+top_prime_button.setStyleSheet(style)
+top_prime_button.clicked.connect(prime_drop_top)
+proxy2.setWidget(top_prime_button)
+button_spot.addItem(proxy2)
+button_spot.nextCol()
+
+proxy3 = QtGui.QGraphicsProxyWidget()
+top_alt_button = QtGui.QPushButton('New Alt Top')
+top_alt_button.setStyleSheet(style)
+top_alt_button.clicked.connect(dialog_pushed_top)
+proxy3.setWidget(top_alt_button)
+button_spot.addItem(proxy3)
+button_spot.nextCol()
+
+button_spot.nextRow()
+proxy4 = QtGui.QGraphicsProxyWidget()
+bot_drop_button = QtGui.QPushButton('Drop Bottom')
+bot_drop_button.setStyleSheet(style_disable)
+bot_drop_button.clicked.connect(drop_button_pushed_bot)
+proxy4.setWidget(bot_drop_button)
+button_spot.addItem(proxy4)
+button_spot.nextCol()
+
+proxy5 = QtGui.QGraphicsProxyWidget()
+bot_prime_button = QtGui.QPushButton('Prime Bottom')
+bot_prime_button.setStyleSheet(style)
+bot_prime_button.clicked.connect(prime_drop_bot)
+proxy5.setWidget(bot_prime_button)
+button_spot.addItem(proxy5)
+button_spot.nextCol()
+
+proxy6 = QtGui.QGraphicsProxyWidget()
+bot_alt_button = QtGui.QPushButton('New Alt Bottom')
+bot_alt_button.setStyleSheet(style)
+bot_alt_button.clicked.connect(dialog_pushed_bot)
+proxy6.setWidget(bot_alt_button)
+button_spot.addItem(proxy6)
+button_spot.nextCol()
+
+
+def update():
+    DropBase.add_data_received_callback(data_receive_callback)
+    if "DropTop" in packet_data:
+        GHOUL_packet_data = packet_data
+        try:
+            ALT_S = GHOUL_packet_data[2]
+            print(ALT_S)
+            update_altitusde(ALT_S)
+            VEL = GHOUL_packet_data[2]
+            update_time(VEL)
+        except IndexError:
+            print('Awaiting Packet')
+
+    if "DropBottom" in packet_data:
+        SAROS_packet_data = packet_data
+        try:
+            ALT_S = SAROS_packet_data[2]
+            update_altitude_S(ALT_S)
+            VEL = SAROS_packet_data[2]
+            update_vel(VEL)
+        except IndexError:
+            print('Awaiting Packet')
+
+    else:
+        print("Error")
+        try:
+            print(packet_data)
+        except IndexError:
+            print('Awaiting Packet')
+
+        # CoolALT = ALT + "\r"
+
+        # DropSam.send_data_64_16(XBee64BitAddress.from_hex_string("0013A20041078CC9"), XBee16BitAddress.UNKNOWN_ADDRESS, CoolALT)
+
+
+if 1:
+    timer = pg.QtCore.QTimer()
+    timer.timeout.connect(update)
+    timer.start(250)
+
+
+if __name__ == '__main__':
+
+    import sys
+
+    if (sys.flags.interactive != 1) or not hasattr(QtCore, 'PYQT_VERSION'):
+        QtGui.QApplication.instance().exec_()
